@@ -155,3 +155,10 @@ em{
 li::marker {
     color:var(--accent-01);
   }
+
+  #img {
+    margin: auto;
+    width: 80%;
+    display: block;
+    padding: 10px;
+  }
