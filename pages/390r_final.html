@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="../css/index.css" rel="stylesheet" type="text/css" media="all">
-    <link rel="icon" type="image/x-icon" href="media/favicon.png">
-    <title>home @ glykon</title>
+    <link rel="icon" type="image/x-icon" href="../media/favicon.png">
+    <title>390rfinal @ glykon</title>
   </head>
   <body>
     <div id = "container">
@@ -21,10 +21,94 @@
       _\       ;  }
       /__`;-...'--'
 </pre>
-        <h3>[TBD] 390R Final Project</h3>
-        <p>to be determined: currently a failing attempt to exploit a patched vulnerability in PHP!</p>
-        <p>(a note for the interested: I Do Not Know PHP)</p>
-        <p><a href="../index.html">go back..</a></p>
+        <h3>[05/21/2024] 390R Final Project</h3>
+        <p>by <a href="https://squirrelly.glykon.cc/">August Huber</a>, <a href = "https://leon3321.is-a.dev/about/">Leon Ge</a>, Karthik Shankar, and Vien Tran</p>
+        <h4>Introduction</h4>
+        <p>This project was aimed at implementing Common Vulnerabilities and Exposures (CVEs) of PHP programming language concentrating on the security risks and possible exploits of stack-based and heap-based vulnerabilities. For this project, we deployed the application of these vulnerabilities in simulated environments to understand and demonstrate how CVEs can be exploited in real-world situations. </p>
+        <p>PHP (PHP Hypertext Processor), a general purpose programming language, is one of the world’s most popular web development languages. It is an interpreted language whose interpreter is mostly written in the C programming language. Because of this, PHP is prone to vulnerabilities. For instance, there is often a lack of proper input sanitation within the source code. In 2006, at the height of PHP usage, there were <a href="https://www.coelho.net/php_cve.html">over 3,000 vulnerabilities</a> in the programming language. </p>
+<br>       
+        <h4>Vulnerability Analysis</h4>
+        <p>The vulnerability is described <a href = "https://nvd.nist.gov/vuln/detail/CVE-2023-3824">by the National Vulnerability Database</a> as follows:        </p>
+        <p class ="blockquote">“In PHP version 8.0.* before 8.0.30,  8.1.* before 8.1.22, and 8.2.* before 8.2.8, when loading phar file, while reading PHAR directory entries, insufficient length checking may lead to a stack buffer overflow, leading potentially to memory corruption or RCE.”        </p>
+        <p>To break this down further, a PHAR (<b>PH</b>P <b>Ar</b>chive) is PHP’s equivalent to Java’s JAR file – an archive file that allows simple transmission of external libraries. Like a JAR or ZIP file, a PHAR file may contain any number of files or directories. Each directory name is limited to 4096 characters, which is related to the same limit in Linux.        </p>
+        <p>However, in the vulnerable PHP versions (PHP versions 8.0.29, 8.1.21, 8.2.7 and prior), there is a bug with respect to how directory names are handled when initially reading from PHAR files. </p>
+        <p>When reading directories from the PHAR file, there is an incorrect length check which causes a buffer overflow in the edge case that the length of directory name is equal to 4096. This overflow writes a null byte two bytes past the buffer’s end and leaks the byte in between the buffer and the null byte. </p>
+        <p>For instance, given the directory name, represented as bytes in hexadecimal, “AABB…EEFF” (where the ellipsis represents some 4092 bytes), the null-byte should occur at position 4097 in the internal buffer. However, we see a result more like this:</p>
+
+        <pre><code>
+  AABB...EEFF XX \00
+        </code></pre>
+<p>Where <b>XX</b> is some byte belonging to a separate item on the stack, and <b>\00</b> is the directory buffer’s null terminator. Instead of being allocated to 4097 bytes (4096 characters + null terminator), the internal buffer for the directory is allocated to 4096 bytes. Then, due to a bad check, the null-byte is written two bytes outside of the buffer’s limit at byte 4096. This causes a leak of the byte at position 4097, and an overwrite of the null-byte to position 4098, which may interfere with other data.</p>
+<br>
+<h4>Vulnerability Internals</h4>
+<p>The bug is located in the <b>p_dir_read()</b> function. Here is its <a href=" https://github.com/php/php-src/blob/be71cadc2f899bc39fe27098042139392e2187db/ext/phar/dirstream.c
+">source code</a> for reference:</p>
+        <pre><code>
+static ssize_t phar_dir_read(php_stream *stream, char *buf, size_t count) /* {{{ */
+  {
+      size_t to_read;
+      HashTable *data = (HashTable *)stream->abstract;
+      zend_string *str_key;
+      zend_ulong unused;
+  
+      if (HASH_KEY_NON_EXISTENT == zend_hash_get_current_key(data, &str_key, &unused)) {
+        return 0;
+      }
+  
+      zend_hash_move_forward(data);
+      to_read = MIN(ZSTR_LEN(str_key), count);
+  
+      if (to_read == 0 || count < ZSTR_LEN(str_key)) {
+        return 0;
+      }
+  
+      memset(buf, 0, sizeof(php_stream_dirent));
+      memcpy(((php_stream_dirent *) buf)->d_name, ZSTR_VAL(str_key), to_read);
+      ((php_stream_dirent *) buf)->d_name[to_read + 1] = '\0';
+      return sizeof(php_stream_dirent);
+  }
+  </code>  
+</pre>
+<p>The <b>p_dir_read()</b> function loads the directory name as an object string <b>str_key</b>. The <b>p_dir_read()</b> function passes in a parameter count which equals 4096 (which is to say, <b>sizeof(buffer)</b>). </p>
+<p>The number of bytes (“<b>to_read</b>”) it writes to the buffer equals <b>len(str_key)</b>. There is a check to see if <b>len(str_key) >= count</b> as to prevent a buffer overflow, so if <b>len(str_key) == count</b> (ie. the length of the directory name is 4096), this check passes.
+</p>
+<p>The 4096 (or fewer) bytes are written to the <b>to_read</b> variable. If the string was non-null terminated (terminated, for instance, by a size variable), this would not be a bugged implementation. However, directory entry strings are null terminated. Since the length of the buffer is exactly equal to the length of the directory string,  there exists no place in the buffer (which is called <b>d_name</b>, for directory name) for a null terminator.
+</p>
+<p>A less bugged solution would place the null terminator at <b>d_name[to_read]</b> (ie. <b>d_name[4096]</b> – remember that buffers are 0 indexed, so the proper final byte is <b>d_name[4095]</b>), which would still be an overwrite. However, the null terminator is actually written at <b>d_name[to_read + 1]</b> (ie. <b>d_name[4097]</b>), which causes both a one byte overwrite and the byte between the end of the buffer (<b>d_name[4095]</b>) and the null terminator (<b>d_name[4097]</b>).
+</p>
+<br>
+<h4>Proof of Concept</h4>
+<p>In our malicious PHAR file, the length of the vulnerable directory entry is exactly 4096 bytes. Note that the directory entry itself only reads “AAAA…AAB.” We will find that our victim doesn’t think the same thing. This is the malicious PHAR file:</p>
+<pre><code>
+&lt;?php
+$phar = new Phar('myarchive.phar');
+$phar->startBuffering();
+$phar->addFromString(str_repeat('A', PHP_MAXPATHLEN - 1).'B', 'This is the content of the file.');
+$phar->stopBuffering();
+?&gt;
+</code></pre>
+<p>This is the victim file. It simply reads:</p>
+<pre><code>
+  &lt;?php
+  $handle = opendir("phar://./myarchive.phar");
+  $x = readdir($handle);
+  closedir($handle);
+  #$test = "hello";
+  var_dump($x);
+  #var_dump($x);
+  ?&gt;
+</code></pre>
+
+<p>When we dump the variable, we see some strange output. Note that this exploit is running on a patched version of PHP that we developed that moves the null terminator several bytes out in order to better illustrate the exploit:</p>
+<pre><code>AAAA...AAAAAAAAAAAAAAB @!2\xf3w</code></pre>
+<p>Remember how our malicious directory name ended with B? We now see a stack leak of, in our patched version, six bytes (including the space!). This is actually a leak in stack of the <b>zend_cli</b> output function, when printing. In the original vulnerability, this leak only would have been the space character – hexadecimal <b>0x20</b>. </p>
+<br>
+<h4>Findings & Conclusions</h4>
+<p>The overflow was non-exploitable for advanced exploits like canary leakage due to self-null-termination of the buffer; however, it could still leak potentially useful information if paired with other exploits or leaked information. If the leak was larger, this exploit would be useful for canary exploitation. The one byte overwrite of the buffer’s of the null-byte may be useful in advanced applications, for instance to overwrite data or an address.</p>
+<p>Following this research, more vulnerability chaining could be done for a full exploit, and fuzzing techniques could be enhanced to detect more exploitable scenarios and robust defenses against types of vulnerabilities in PHP. </p>
+<p>This vulnerability would have been prevented with proper bounds checking and secure memory management. This stresses the necessary role of secure code development in PHP, especially since it is such a widely used language. While we were unable to achieve arbitrary code execution (<a href="https://www.bbc.com/news/technology-68344987">although it is thought that law enforcement used this vulnerability to take down the ransomware group LockBit</a>), the leak nonetheless demonstrates the necessity of rigorous security testing, particularly through the usage tools like fuzzers.</p>
+<br>
+<p><a href="../index.html">go back..</a></p>
         <footer>
         <div id = "footer">
         <script id="umaring_js" src="https://umaring.mkr.cx/ring.js?id=squirrelly"></script>
@@ -32,5 +116,9 @@
         </div>
         </footer>
     </div>
+    <link rel="stylesheet" href="../scripts/highlightjs/styles/base16/gruvbox-dark-soft.css">
+    <script src="../scripts/highlightjs/highlight.min.js"></script>
+
+    <script>hljs.highlightAll();</script>
   </body>
 </html>
