@@ -1,11 +1,11 @@
 body{
-    --text: #ebdbb2;
-    --bg: #282828;
-    --accent-01: #458588;
-    --accent-02: #fb4934;
-    --accent-03: #b8bb26;
-    --accent-04:#8ec07c;
-    --bold: #458588;
+    --text: #e0def4;
+    --bg: #191724;
+    --accent-01: #31748f;
+    --accent-02: #eb6f92;
+    --accent-03: #f6c177;
+    --accent-04:#9ccfd8;
+    --bold: #c4a7e7;
     background-size: cover;
     color: var(--text);
     margin-top: 0;
@@ -38,7 +38,6 @@ a{
 }
 
 #footer{
-    border-top: 2px dashed var(--accent-01);
     padding: 10px;
     text-align: center;
     -webkit-transition: border 0.25s linear;
